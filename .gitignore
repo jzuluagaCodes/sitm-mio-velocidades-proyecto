@@ -1,0 +1,14 @@
+# Maven
+target/
+
+# Outputs generados (opcional, pueden incluirse como evidencia)
+# output/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
