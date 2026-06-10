@@ -1,7 +1,7 @@
 @echo off
 REM Ejecuta el Master con 4 Workers locales en puertos 10001-10004.
 REM Ajusta --workers si los Workers estan en maquinas distintas.
-java -jar ..\target$JAR ^
+java -Xmx4g -jar ..\target$JAR ^
   --lines ..$DATA_LINES ^
   --datagrams ..$DATA_DGRAMS ^
   --output ..\output\distribuido.csv ^
