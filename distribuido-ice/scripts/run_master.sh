@@ -2,7 +2,7 @@
 # Ejecuta el Master con 4 Workers locales en puertos 10001-10004.
 # Ajusta --workers si los Workers están en máquinas distintas.
 JAR="../target/sitm-mio-distribuido-ice-1.0.0.jar"
-java -jar "$JAR" \
+java -Xmx4g -jar "$JAR" \
   --lines ../data/sample/lines-241-ActiveGT.csv \
   --datagrams ../data/sample/datagrams-MiniPilot.csv \
   --output ../output/distribuido.csv \
