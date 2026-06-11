@@ -28,7 +28,7 @@ public final class WorkerServerIce {
         try (Communicator communicator = Util.initialize(iceArgs)) {
             ObjectAdapter adapter = communicator.createObjectAdapterWithEndpoints(
                     "CalculadoraAdapter",
-                    "tcp -p " + port
+                    "tcp -h 0.0.0.0 -p " + port
             );
 
             CalculadoraImpl impl = new CalculadoraImpl(threads);
