@@ -1,136 +1,124 @@
-# Proyecto final ISW4 - Velocidades promedio SITM-MIO
+# Proyecto Final ISW4 - Velocidades Promedio SITM-MIO
+## Versión Distribuida con ZeroC ICE
 
-El proyecto calcula la velocidad promedio por ruta y por mes para las rutas activas del piloto. Incluye tres versiones:
+Este proyecto calcula la velocidad promedio por ruta y por mes para las rutas activas del piloto del MIO en Cali. Esta versión implementa una arquitectura distribuida eficiente mediante el patrón **Master-Worker** utilizando el middleware **ZeroC ICE**.
 
-1. **Monolito simple**: lectura, filtrado y agregación en un solo flujo.
-2. **Monolito concurrente con hilos**: particiona los datagramas y usa `ExecutorService`.
-3. **Distribuido Master-Worker**: un maestro reparte particiones a workers por sockets.
+---
 
 ## Requisitos
 
 - Java 11 o superior
 - Maven 3.6 o superior
+- Conectividad de red (Local, ZeroTier o LAN del laboratorio)
 
-## Estructura
+---
+
+## Estructura de Paquetes
 
 ```text
 src/main/java/edu/icesi/sitmmio
-├── app                 Entradas MainSimple, MainThreads, MainDistributedMaster y MainDistributedWorker
-├── core                Cálculo, agregación y escritura de resultados
-├── csv                 Lector CSV, lector de rutas activas y mapeo de datagramas
-├── concurrent          Particionador y tareas concurrentes
-├── distributed         Implementación Master-Worker
-├── domain              Clases de dominio
-└── util                Utilidades de encabezados y fechas
+├── app         Entradas principales (MainMaster y MainWorker)
+├── concurrent  Particionador de datagramas y Pool de Hilos concurrente (ThreadPool/ExecutorService)
+├── core        Cálculo de velocidades, agregación local y escritura de resultados CSV
+├── csv         Lector de datagramas, lector de rutas activas y mapeo dinámico de columnas
+├── domain      Clases de dominio y llaves de agregación (SpeedRecord, RouteMonthKey, etc.)
+├── ice         Implementación del Middleware (CalculadoraImpl, MasterIceCalculator, Serializadores)
+└── util        Utilidades de parsing de encabezados y extracción de fechas/meses
 ```
 
-## Compilar
+---
+
+## Compilar y Empaquetar
+
+El proyecto utiliza el plugin `maven-shade-plugin` para compilar la especificación de Slice (`Calculadora.ice`) y generar dos unidades de despliegue (JARs) totalmente independientes con todas sus dependencias embebidas.
 
 ```bash
 mvn clean package
 ```
 
-Genera el archivo `target/sitm-mio-velocidades-1.0.0.jar`.
+Esto generará en la carpeta `target/` los siguientes ejecutables:
+
+- `target/sitm-mio-master-1.0.0.jar` *(Orquestador Central)*
+- `target/sitm-mio-worker-1.0.0.jar` *(Nodo de Computación con Flujo Concurrente)*
 
 ---
 
-## Ejecutar monolito simple
+## Ejecución con Scripts Automatizados
 
-**Linux / Mac:**
-```bash
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainSimple \
-  --lines data/sample/lines-241-ActiveGT.csv \
-  --datagrams data/sample/datagrams-MiniPilot.csv \
-  --output output/simple.csv
-```
+> Ejecutar siempre desde la raíz del proyecto.
 
-**Windows (PowerShell):**
+### 1. Desplegar Nodos Worker 
+
+Los Workers reciben de forma obligatoria el puerto y opcional el número de hilos concurrentes para su `ThreadPool` interno.
+
+> Si se omite el número de hilos, se utilizarán 4 hilos por defecto.
+
+#### Windows (PowerShell o CMD)
+
 ```powershell
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainSimple --lines data/sample/lines-241-ActiveGT.csv --datagrams data/sample/datagrams-MiniPilot.csv --output output/simple.csv
+# Uso: .\run_worker.bat <puerto> [hilos]
+.\run_worker.bat 10001 8
 ```
 
-> Para usar el dataset completo reemplazar `datagrams-MiniPilot.csv` por la ruta a `datagrams4Pilot.csv` en `/opt/sitm-mio/`.
+#### Linux / macOS / Git Bash
+
+```bash
+# Otorgar permisos de ejecución la primera vez
+chmod +x run_worker.sh
+
+# Uso: ./run_worker.sh <puerto> [hilos]
+./run_worker.sh 10001 8
+```
 
 ---
 
-## Ejecutar monolito concurrente con hilos
+### 2. Desplegar Nodo Master 
 
-**Linux / Mac:**
-```bash
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainThreads \
-  --lines data/sample/lines-241-ActiveGT.csv \
-  --datagrams data/sample/datagrams-MiniPilot.csv \
-  --output output/hilos.csv \
-  --threads 4
+El Master leerá los datasets locales, particionará los datagramas y los enviará de forma asíncrona (**AMI - Asynchronous Method Invocation**) a la lista de Workers configurados en el script.
+
+#### Configuración previa
+
+Antes de ejecutar, abre el script del Master con un editor de texto y actualiza el parámetro `--workers` con las direcciones IP reales de los Workers disponibles en la red.
+
+Ejemplo:
+
+```text
+--workers 10.111.44.14:10001,10.111.44.146:10001
 ```
 
-**Windows (PowerShell):**
+#### Windows (PowerShell o CMD)
+
 ```powershell
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainThreads --lines data/sample/lines-241-ActiveGT.csv --datagrams data/sample/datagrams-MiniPilot.csv --output output/hilos.csv --threads 4
+.\run_master.bat
 ```
 
-> El parámetro `--threads` es opcional. Por defecto usa el número de núcleos disponibles del sistema.
+#### Linux / macOS / Git Bash
+
+```bash
+# Otorgar permisos de ejecución la primera vez
+chmod +x run_master.sh
+
+./run_master.sh
+```
 
 ---
 
-## Ejecutar distribuido Master-Worker
+## Monitoreo en Tiempo Real
 
-Abrir **terminales separadas** en la carpeta del proyecto.
+Cuando el Master distribuya las cargas de datos a la red, cada consola de los Workers imprimirá un mensaje indicando la recepción del paquete y el inicio de su procesamiento concurrente.
 
-**Terminal 1 — Worker 1:**
-
-Linux/Mac:
-```bash
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainDistributedWorker --port 9090
+```text
+[Worker] ¡Paquete recibido! 
 ```
-Windows:
-```powershell
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainDistributedWorker --port 9090
-```
-
-**Terminal 2 — Worker 2:**
-
-Linux/Mac:
-```bash
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainDistributedWorker --port 9091
-```
-Windows:
-```powershell
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainDistributedWorker --port 9091
-```
-
-**Terminal 3 — Maestro:**
-
-Linux/Mac:
-```bash
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainDistributedMaster \
-  --lines data/sample/lines-241-ActiveGT.csv \
-  --datagrams data/sample/datagrams-MiniPilot.csv \
-  --output output/distribuido.csv \
-  --workers localhost:9090,localhost:9091
-```
-Windows:
-```powershell
-java -cp target/sitm-mio-velocidades-1.0.0.jar edu.icesi.sitmmio.app.MainDistributedMaster --lines data/sample/lines-241-ActiveGT.csv --datagrams data/sample/datagrams-MiniPilot.csv --output output/distribuido.csv --workers localhost:9090,localhost:9091
-```
-
-> Se puede agregar más workers repitiendo el parámetro con puertos adicionales, por ejemplo: `--workers localhost:9090,localhost:9091,localhost:9092`
 
 ---
 
 ## Salida
 
-El CSV de salida tiene el siguiente formato:
+Los resultados consolidados se generarán automáticamente en:
 
 ```text
-ruta,mes,velocidad_promedio,cantidad_registros
-P10,2025-01,28.000000,2
+output/distribuido.csv
 ```
 
-Los archivos generados quedan en la carpeta `output/`.
-
----
-
-## Nota importante sobre columnas del CSV
-
-El código detecta automáticamente nombres de columnas comunes en español e inglés para ruta, fecha y velocidad. Si el CSV del curso usa un nombre de columna diferente, solo se ajustan las listas de candidatos en `DatagramMapper` y `ActiveRoutesReader`.
+Este archivo contendrá las velocidades promedio calculadas por ruta y por mes a partir de los datos procesados de manera distribuida.
