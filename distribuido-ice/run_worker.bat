@@ -9,5 +9,6 @@ IF "%1"=="" (
 SET PORT=%1
 SET THREADS=%2
 IF "%THREADS%"=="" SET THREADS=4
-echo [Worker] Iniciando en puerto %PORT% con %THREADS% hilos...
-java -cp ..\target$JAR edu.icesi.sitmmio.app.MainWorker --port %PORT% --threads %THREADS%
+
+
+java -jar target/sitm-mio-worker-1.0.0.jar --port %PORT% --threads %THREADS%
