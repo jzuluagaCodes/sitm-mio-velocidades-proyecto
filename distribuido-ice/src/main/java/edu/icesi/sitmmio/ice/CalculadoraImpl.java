@@ -22,6 +22,8 @@ public final class CalculadoraImpl implements sitmmio.Calculadora {
                            String[] activeRoutes,
                            Current current) {
 
+        System.out.println("\n[Worker] ¡Paquete recibido! Procesando " + data.length + " filas de datagramas...");
+
         List<Map<String, String>> rows = Arrays.asList(partition);
         Set<String> routeSet = new HashSet<>(Arrays.asList(activeRoutes));
 
