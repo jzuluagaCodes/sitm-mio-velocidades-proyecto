@@ -1,14 +1,16 @@
-# Maven
+# Build
 target/
+**/target/
 
-# Outputs generados (opcional, pueden incluirse como evidencia)
-# output/
+# Outputs
+output/
+**/output/
+
+# Large datasets
+**/data/sample/datagrams-MiniPilot.csv
+**/data/sample/datagrams4Pilot.csv
+**/data/benchmarks/datagrams-*.csv
 
 # IDE
 .idea/
 *.iml
-.vscode/
-
-# Sistema operativo
-.DS_Store
-Thumbs.db

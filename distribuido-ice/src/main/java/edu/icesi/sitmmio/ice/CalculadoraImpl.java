@@ -1,13 +1,23 @@
 package edu.icesi.sitmmio.ice;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import com.zeroc.Ice.Current;
+
 import edu.icesi.sitmmio.concurrent.AggregationTask;
 import edu.icesi.sitmmio.concurrent.Partitioner;
 import edu.icesi.sitmmio.domain.AggregationResult;
 import edu.icesi.sitmmio.domain.RouteMonthKey;
-
-import java.util.*;
-import java.util.concurrent.*;
 
 public final class CalculadoraImpl implements sitmmio.Calculadora {
 
@@ -18,52 +28,55 @@ public final class CalculadoraImpl implements sitmmio.Calculadora {
     }
 
     @Override
-    public String calcular(Map<String, String>[] partition,
-                           String[] activeRoutes,
-                           Current current) {
+    public String calcular(String[] partition, String[] activeRoutes, Current current) {
+        System.out.println("\n[Worker] Paquete recibido con " + partition.length + " filas.");
 
-        System.out.println("\n[Worker] ¡Paquete recibido!");
-
-        List<Map<String, String>> rows = Arrays.asList(partition);
+        List<String> rows = Arrays.asList(partition);
         Set<String> routeSet = new HashSet<>(Arrays.asList(activeRoutes));
 
-        // Si solo hay 1 hilo, procesa directo sin overhead de ThreadPool
-        if (threads == 1) {
-            return processSingle(rows, routeSet);
+        if (threads == 1 || rows.size() <= 1) {
+            Map<RouteMonthKey, AggregationResult> results =
+                    new AggregationTask(rows, routeSet).call();
+
+            System.out.println("[Worker] Resultados parciales generados: " + results.size());
+            return ResultSerializer.serialize(results);
         }
 
-        // Varios hilos: subdivide la partición recibida
         Partitioner partitioner = new Partitioner();
-        List<List<Map<String, String>>> subPartitions = partitioner.split(rows, threads);
+        List<List<String>> subPartitions = partitioner.split(rows, threads);
 
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         List<Future<Map<RouteMonthKey, AggregationResult>>> futures = new ArrayList<>();
 
-        for (List<Map<String, String>> sub : subPartitions)
-            futures.add(pool.submit(new AggregationTask(sub, routeSet)));
+        for (List<String> subPartition : subPartitions) {
+            if (!subPartition.isEmpty()) {
+                futures.add(pool.submit(new AggregationTask(subPartition, routeSet)));
+            }
+        }
 
         pool.shutdown();
 
         Map<RouteMonthKey, AggregationResult> consolidated = new TreeMap<>();
-        for (Future<Map<RouteMonthKey, AggregationResult>> f : futures) {
+
+        for (Future<Map<RouteMonthKey, AggregationResult>> future : futures) {
             try {
-                f.get().forEach((k, v) ->
-                    consolidated.computeIfAbsent(k, ignored -> new AggregationResult()).merge(v));
-            } catch (InterruptedException | ExecutionException e) {
+                Map<RouteMonthKey, AggregationResult> partial = future.get();
+
+                partial.forEach((key, value) ->
+                        consolidated
+                                .computeIfAbsent(key, ignored -> new AggregationResult())
+                                .merge(value)
+                );
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                System.err.println("[Worker] Procesamiento interrumpido: " + e.getMessage());
+            } catch (ExecutionException e) {
                 System.err.println("[Worker] Error en hilo interno: " + e.getMessage());
             }
         }
 
-        return ResultSerializer.serialize(consolidated);
-    }
+        System.out.println("[Worker] Resultados parciales generados: " + consolidated.size());
 
-    private String processSingle(List<Map<String, String>> rows, Set<String> routeSet) {
-        edu.icesi.sitmmio.csv.DatagramMapper mapper = new edu.icesi.sitmmio.csv.DatagramMapper();
-        edu.icesi.sitmmio.core.SpeedAggregator aggregator = new edu.icesi.sitmmio.core.SpeedAggregator();
-        Map<RouteMonthKey, AggregationResult> results = aggregator.newResultMap();
-        for (Map<String, String> row : rows)
-            mapper.map(row, routeSet).ifPresent(r -> aggregator.add(results, r));
-        return ResultSerializer.serialize(results);
+        return ResultSerializer.serialize(consolidated);
     }
 }

@@ -1,29 +1,23 @@
 package edu.icesi.sitmmio.ice;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+
 import com.zeroc.Ice.Communicator;
 import com.zeroc.Ice.ObjectPrx;
 import com.zeroc.Ice.Util;
-import edu.icesi.sitmmio.concurrent.Partitioner;
+
 import edu.icesi.sitmmio.domain.AggregationResult;
 import edu.icesi.sitmmio.domain.RouteMonthKey;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CompletableFuture;
-
-/**
- * Orquestador Master del patrón Master-Worker con ICE.
- *
- * Responsabilidades:
- *  1. Crear proxies ICE hacia cada Worker registrado.
- *  2. Particionar el dataset en tantas partes como Workers haya.
- *  3. Enviar cada partición al Worker correspondiente (llamada síncrona ICE).
- *  4. Consolidar todos los resultados parciales en un único mapa final.
- *
- * Corresponde al componente "CalculadoraPrx + ParticionadorCSV" del
- * dispositivo de procesamiento central en el diagrama de deployment.
- */
 public final class MasterIceCalculator {
+
+    private static final int CHUNK_SIZE = 100_000;
 
     public static final class WorkerAddress {
         private final String host;
@@ -34,15 +28,34 @@ public final class MasterIceCalculator {
             this.port = port;
         }
 
-        public String host() { return host; }
-        public int port()    { return port; }
+        public String host() {
+            return host;
+        }
+
+        public int port() {
+            return port;
+        }
 
         public static WorkerAddress parse(String spec) {
             String[] parts = spec.split(":");
-            if (parts.length != 2)
+
+            if (parts.length != 2) {
                 throw new IllegalArgumentException(
-                    "Formato esperado host:puerto, recibido: " + spec);
+                        "Formato esperado host:puerto, recibido: " + spec
+                );
+            }
+
             return new WorkerAddress(parts[0], Integer.parseInt(parts[1]));
+        }
+    }
+
+    private static final class WorkerProxy {
+        private final WorkerAddress address;
+        private final sitmmio.CalculadoraPrx proxy;
+
+        private WorkerProxy(WorkerAddress address, sitmmio.CalculadoraPrx proxy) {
+            this.address = address;
+            this.proxy = proxy;
         }
     }
 
@@ -52,79 +65,134 @@ public final class MasterIceCalculator {
         this.workers = new ArrayList<>(workers);
     }
 
-    /**
-     * Distribuye el dataset entre los Workers, recopila resultados parciales
-     * y los consolida en un único mapa ordenado.
-     *
-     * @param allRows      filas completas del CSV de datagramas
-     * @param activeRoutes rutas activas del piloto
-     * @return mapa consolidado de velocidades promedio por ruta y mes
-     */
-
-    public Map<RouteMonthKey, AggregationResult> calculate(List<Map<String, String>> allRows, Set<String> activeRoutes) {
-        if (allRows.isEmpty() || workers.isEmpty()) {
+    public Map<RouteMonthKey, AggregationResult> calculate(
+            List<String> allRows,
+            Set<String> activeRoutes
+    ) {
+        if (allRows == null || allRows.isEmpty() || workers.isEmpty()) {
             return new TreeMap<>();
         }
 
-        // 1. Particionar el dataset entre la cantidad de Workers
-        Partitioner partitioner = new Partitioner();
-        List<List<Map<String, String>>> partitions = partitioner.split(allRows, workers.size());
-
-        // 2. Mapa Concurrente para consolidación (Garantiza CORRECTITUD en llamadas paralelas)
         Map<RouteMonthKey, AggregationResult> consolidated = new ConcurrentHashMap<>();
+
         List<String> routeList = new ArrayList<>(activeRoutes);
+        String[] routeArray = routeList.toArray(new String[0]);
 
-        // Lista para monitorear los futuros de Java
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        List<List<String>> chunks = splitByChunkSize(allRows, CHUNK_SIZE);
 
-        String[] iceArgs = { "--Ice.MessageSizeMax=131072" }; // 128 MB máximo por mensaje
+        System.out.println("[Master] Total filas a procesar: " + allRows.size());
+        System.out.println("[Master] Tamaño de chunk: " + CHUNK_SIZE);
+        System.out.println("[Master] Total chunks generados: " + chunks.size());
+        System.out.println("[Master] Workers configurados: " + workers.size());
+
+        String[] iceArgs = {
+                "--Ice.MessageSizeMax=1048576"
+        };
 
         try (Communicator communicator = Util.initialize(iceArgs)) {
-            for (int i = 0; i < partitions.size(); i++) {
-                List<Map<String, String>> partition = partitions.get(i);
-                if (partition.isEmpty()) continue;
+            List<WorkerProxy> availableWorkers = createAvailableWorkerProxies(communicator);
 
-                WorkerAddress addr = workers.get(i % workers.size());
-                String proxyStr = "Calculadora:tcp -h " + addr.host() + " -p " + addr.port();
-                ObjectPrx base = communicator.stringToProxy(proxyStr);
-                
-                // Conversión directa al Proxy generado por Slice
-                sitmmio.CalculadoraPrx proxy = sitmmio.CalculadoraPrx.checkedCast(base);
+            if (availableWorkers.isEmpty()) {
+                System.err.println("[Master] No hay workers disponibles. No se puede distribuir el procesamiento.");
+                return new TreeMap<>();
+            }
 
-                if (proxy == null) {
-                    System.err.println("[Master] No se pudo conectar al Worker " + addr.host() + ":" + addr.port());
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+            for (int i = 0; i < chunks.size(); i++) {
+                List<String> chunk = chunks.get(i);
+
+                if (chunk.isEmpty()) {
                     continue;
                 }
 
-                System.out.println("[Master] Enviando asíncronamente " + partition.size() 
-                        + " filas al Worker " + addr.host() + ":" + addr.port());
+                WorkerProxy worker = availableWorkers.get(i % availableWorkers.size());
 
-                @SuppressWarnings("unchecked")
-                Map<String, String>[] partitionArray = partition.toArray(new Map[0]);
-                String[] routeArray = routeList.toArray(new String[0]);
+                System.out.println("[Master] Enviando chunk " + (i + 1) + "/" + chunks.size()
+                        + " con " + chunk.size()
+                        + " filas al Worker "
+                        + worker.address.host() + ":" + worker.address.port());
 
-                CompletableFuture<String> iceFuture = proxy.calcularAsync(partitionArray, routeArray);
+                String[] partitionArray = chunk.toArray(new String[0]);
 
-                CompletableFuture<Void> javaFuture = iceFuture.thenAccept(resultCsv -> {
-                    Map<RouteMonthKey, AggregationResult> partial = ResultSerializer.deserialize(resultCsv);
-                    synchronized (consolidated) {
-                        partial.forEach((k, v) ->
-                            consolidated.computeIfAbsent(k, ignored -> new AggregationResult()).merge(v));
-                    }
-                    System.out.println("[Master] Respuesta procesada de " + addr.host() + ":" + addr.port());
-                }).exceptionally(ex -> {
-                    System.err.println("[Master] Error en nodo remoto " + addr.host() + ": " + ex.getMessage());
-                    return null;
-                });
+                CompletableFuture<String> iceFuture =
+                        worker.proxy.calcularAsync(partitionArray, routeArray);
+
+                CompletableFuture<Void> javaFuture = iceFuture
+                        .thenAccept(resultCsv -> {
+                            Map<RouteMonthKey, AggregationResult> partial =
+                                    ResultSerializer.deserialize(resultCsv);
+
+                            synchronized (consolidated) {
+                                partial.forEach((key, value) ->
+                                        consolidated
+                                                .computeIfAbsent(key, ignored -> new AggregationResult())
+                                                .merge(value)
+                                );
+                            }
+
+                            System.out.println("[Master] Respuesta procesada desde Worker "
+                                    + worker.address.host() + ":" + worker.address.port()
+                                    + " con " + partial.size() + " entradas parciales.");
+                        })
+                        .exceptionally(ex -> {
+                            System.err.println("[Master] Error en nodo remoto "
+                                    + worker.address.host() + ":" + worker.address.port()
+                                    + ": " + ex.getMessage());
+                            return null;
+                        });
 
                 futures.add(javaFuture);
             }
 
-            // 🛑 BARRERA GLOBAL: Esperamos a que TODOS los Workers terminen de procesar en la red del laboratorio
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         }
 
-        // Retornamos un TreeMap ordenado para que el escritor de archivos guarde el reporte final alfabéticamente
+        System.out.println("[Master] Entradas consolidadas: " + consolidated.size());
+
         return new TreeMap<>(consolidated);
+    }
+
+    private List<WorkerProxy> createAvailableWorkerProxies(Communicator communicator) {
+        List<WorkerProxy> availableWorkers = new ArrayList<>();
+
+        for (WorkerAddress address : workers) {
+            try {
+                String proxyStr = "Calculadora:tcp -h " + address.host() + " -p " + address.port();
+
+                ObjectPrx base = communicator.stringToProxy(proxyStr);
+                sitmmio.CalculadoraPrx proxy = sitmmio.CalculadoraPrx.checkedCast(base);
+
+                if (proxy == null) {
+                    System.err.println("[Master] No se pudo conectar al Worker "
+                            + address.host() + ":" + address.port());
+                    continue;
+                }
+
+                availableWorkers.add(new WorkerProxy(address, proxy));
+
+                System.out.println("[Master] Worker disponible: "
+                        + address.host() + ":" + address.port());
+            } catch (Exception ex) {
+                System.err.println("[Master] Worker no disponible "
+                        + address.host() + ":" + address.port()
+                        + " -> " + ex.getMessage());
+            }
+        }
+
+        return availableWorkers;
+    }
+
+    private List<List<String>> splitByChunkSize(List<String> rows, int chunkSize) {
+        List<List<String>> chunks = new ArrayList<>();
+
+        int safeChunkSize = Math.max(1, chunkSize);
+
+        for (int start = 0; start < rows.size(); start += safeChunkSize) {
+            int end = Math.min(start + safeChunkSize, rows.size());
+            chunks.add(new ArrayList<>(rows.subList(start, end)));
+        }
+
+        return chunks;
     }
 }

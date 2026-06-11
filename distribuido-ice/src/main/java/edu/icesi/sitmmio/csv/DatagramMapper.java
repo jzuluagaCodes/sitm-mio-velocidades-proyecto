@@ -1,45 +1,173 @@
 package edu.icesi.sitmmio.csv;
 
-import edu.icesi.sitmmio.domain.SpeedRecord;
-import edu.icesi.sitmmio.util.HeaderFinder;
-import edu.icesi.sitmmio.util.MonthExtractor;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
-import java.util.*;
+import edu.icesi.sitmmio.domain.SpeedRecord;
 
 public final class DatagramMapper {
-    private static final List<String> ROUTE_COLS   = List.of("route_id","routeid","line_id","lineid","route","ruta","line","linea","linename","nombre_ruta");
-    private static final List<String> DATE_COLS    = List.of("timestamp","time","date","fecha","fecha_hora","datetime","created_at","gps_time","event_time");
-    private static final List<String> SPEED_COLS   = List.of("speed","velocidad","velocity","kmh","km_h","speed_kmh","velocidad_kmh","velocidadpromedio");
-    private static final List<String> DIST_COLS    = List.of("distance","distancia","distance_km","distancia_km","meters","metros");
-    private static final List<String> DUR_COLS     = List.of("duration","duracion","elapsed","tiempo","duration_seconds","segundos","seconds");
 
-    public Optional<SpeedRecord> map(Map<String, String> row, Set<String> activeRoutes) {
-        String routeId = HeaderFinder.find(row, ROUTE_COLS);
-        if (routeId == null || routeId.isBlank()) return Optional.empty();
-        routeId = routeId.trim();
-        if (!activeRoutes.isEmpty() && !activeRoutes.contains(routeId)) return Optional.empty();
+    private static final int BUS_ID_INDEX = 2;
+    private static final int LATITUDE_INDEX = 4;
+    private static final int LONGITUDE_INDEX = 5;
+    private static final int ROUTE_ID_INDEX = 7;
+    private static final int TIMESTAMP_INDEX = 10;
 
-        String yearMonth = MonthExtractor.toYearMonth(HeaderFinder.find(row, DATE_COLS));
-        if (yearMonth == null) return Optional.empty();
+    private static final double GPS_SCALE = 10_000_000.0;
+    private static final double MAX_REASONABLE_SPEED_KMH = 120.0;
+    private static final double EARTH_RADIUS_KM = 6371.0;
 
-        Double speed = parseDouble(HeaderFinder.find(row, SPEED_COLS));
-        if (speed == null) speed = calcFromDistDur(row);
-        if (speed == null || speed.isNaN() || speed.isInfinite() || speed < 0) return Optional.empty();
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-        return Optional.of(new SpeedRecord(routeId, yearMonth, speed));
+    private final Map<String, PreviousPoint> previousPointByRouteAndBus = new HashMap<>();
+
+    public Optional<SpeedRecord> map(String rawLine, Set<String> activeRoutes) {
+        if (rawLine == null || rawLine.isBlank()) {
+            return Optional.empty();
+        }
+
+        String[] row = parseLine(rawLine, ',');
+
+        if (row.length <= TIMESTAMP_INDEX) {
+            return Optional.empty();
+        }
+
+        try {
+            String busId = row[BUS_ID_INDEX].trim();
+            String routeId = row[ROUTE_ID_INDEX].trim();
+
+            if (busId.isEmpty() || routeId.isEmpty()) {
+                return Optional.empty();
+            }
+
+            if (activeRoutes != null && !activeRoutes.isEmpty() && !activeRoutes.contains(routeId)) {
+                return Optional.empty();
+            }
+
+            double latitude = Double.parseDouble(row[LATITUDE_INDEX].trim()) / GPS_SCALE;
+            double longitude = Double.parseDouble(row[LONGITUDE_INDEX].trim()) / GPS_SCALE;
+
+            if (latitude == 0.0 && longitude == 0.0) {
+                return Optional.empty();
+            }
+
+            LocalDateTime timestamp = LocalDateTime.parse(
+                    row[TIMESTAMP_INDEX].trim(),
+                    TIMESTAMP_FORMATTER
+            );
+
+            String trajectoryKey = routeId + "|" + busId;
+            PreviousPoint previous = previousPointByRouteAndBus.get(trajectoryKey);
+
+            previousPointByRouteAndBus.put(
+                    trajectoryKey,
+                    new PreviousPoint(latitude, longitude, timestamp)
+            );
+
+            if (previous == null) {
+                return Optional.empty();
+            }
+
+            long seconds = Duration.between(previous.timestamp, timestamp).getSeconds();
+
+            if (seconds <= 0) {
+                return Optional.empty();
+            }
+
+            double distanceKm = haversineKm(
+                    previous.latitude,
+                    previous.longitude,
+                    latitude,
+                    longitude
+            );
+
+            double hours = seconds / 3600.0;
+            double speedKmh = distanceKm / hours;
+
+            if (Double.isNaN(speedKmh)
+                    || Double.isInfinite(speedKmh)
+                    || speedKmh < 0
+                    || speedKmh > MAX_REASONABLE_SPEED_KMH) {
+                return Optional.empty();
+            }
+
+            String yearMonth = YearMonth.from(timestamp).toString();
+
+            return Optional.of(new SpeedRecord(routeId, yearMonth, speedKmh));
+        } catch (RuntimeException ex) {
+            return Optional.empty();
+        }
     }
 
-    private Double calcFromDistDur(Map<String, String> row) {
-        Double dist = parseDouble(HeaderFinder.find(row, DIST_COLS));
-        Double dur  = parseDouble(HeaderFinder.find(row, DUR_COLS));
-        if (dist == null || dur == null || dur <= 0) return null;
-        double speed = (dist / 1000.0) / (dur / 3600.0);
-        return (speed < 1.0 || speed > 120.0) ? null : speed;
+    private String[] parseLine(String line, char separator) {
+        String[] quickSplit = line.split(String.valueOf(separator), -1);
+
+        if (!line.contains("\"")) {
+            for (int i = 0; i < quickSplit.length; i++) {
+                quickSplit[i] = quickSplit[i].trim();
+            }
+            return quickSplit;
+        }
+
+        java.util.List<String> values = new java.util.ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuotes = false;
+
+        for (int i = 0; i < line.length(); i++) {
+            char character = line.charAt(i);
+
+            if (character == '"') {
+                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    current.append('"');
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (character == separator && !inQuotes) {
+                values.add(current.toString().trim());
+                current.setLength(0);
+            } else {
+                current.append(character);
+            }
+        }
+
+        values.add(current.toString().trim());
+
+        return values.toArray(new String[0]);
     }
 
-    private Double parseDouble(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        try { return Double.parseDouble(raw.trim().replace(",",".")); }
-        catch (NumberFormatException e) { return null; }
+    private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+        double deltaLat = Math.toRadians(lat2 - lat1);
+        double deltaLon = Math.toRadians(lon2 - lon1);
+
+        double radLat1 = Math.toRadians(lat1);
+        double radLat2 = Math.toRadians(lat2);
+
+        double a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)
+                + Math.cos(radLat1) * Math.cos(radLat2)
+                * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return EARTH_RADIUS_KM * c;
+    }
+
+    private static final class PreviousPoint {
+        private final double latitude;
+        private final double longitude;
+        private final LocalDateTime timestamp;
+
+        private PreviousPoint(double latitude, double longitude, LocalDateTime timestamp) {
+            this.latitude = latitude;
+            this.longitude = longitude;
+            this.timestamp = timestamp;
+        }
     }
 }

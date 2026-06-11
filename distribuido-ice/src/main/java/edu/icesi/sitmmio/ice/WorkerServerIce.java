@@ -22,13 +22,13 @@ public final class WorkerServerIce {
 
     public static void start(int port, int threads) {
         String[] iceArgs = {
-            "--Ice.MessageSizeMax=131072"  // 128 MB máximo por mensaje ICE
+            "--Ice.MessageSizeMax=1048576"  // 128 MB máximo por mensaje ICE
         };
 
         try (Communicator communicator = Util.initialize(iceArgs)) {
             ObjectAdapter adapter = communicator.createObjectAdapterWithEndpoints(
                     "CalculadoraAdapter",
-                    "tcp -p " + port
+                    "tcp -h 0.0.0.0 -p " + port
             );
 
             CalculadoraImpl impl = new CalculadoraImpl(threads);
