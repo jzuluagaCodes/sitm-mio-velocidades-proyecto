@@ -17,7 +17,7 @@ import edu.icesi.sitmmio.domain.RouteMonthKey;
 
 public final class MasterIceCalculator {
 
-    private static final int CHUNK_SIZE = 100_000;
+    private static final int CHUNK_SIZE = 500_000;
 
     public static final class WorkerAddress {
         private final String host;
