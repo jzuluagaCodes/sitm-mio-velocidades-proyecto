@@ -103,24 +103,18 @@ public final class MasterIceCalculator {
                 Map<String, String>[] partitionArray = partition.toArray(new Map[0]);
                 String[] routeArray = routeList.toArray(new String[0]);
 
-                // 🔥 CAMBIO CRÍTICO: LLAMADA ASÍNCRONA (AMI)
-                // No bloquea el hilo principal; el ciclo 'for' continúa de inmediato enviando datos a los demás workers.
-                com.zeroc.Ice.CompletableFuture<String> iceFuture = proxy.calcularAsync(partitionArray, routeArray);
+                CompletableFuture<String> iceFuture = proxy.calcularAsync(partitionArray, routeArray);
 
-                // Configurar la acción (Callback) para cuando el Worker termine su cómputo en la red
-                CompletableFuture<Void> javaFuture = iceFuture.whenComplete((resultCsv, ex) -> {
-                    if (ex == null) {
-                        Map<RouteMonthKey, AggregationResult> partial = ResultSerializer.deserialize(resultCsv);
-                        
-                        // Bloque sincronizado para evitar condiciones de carrera (Race Conditions) en el mapa global
-                        synchronized (consolidated) {
-                            partial.forEach((k, v) ->
-                                    consolidated.computeIfAbsent(k, ignored -> new AggregationResult()).merge(v));
-                        }
-                        System.out.println("[Master] Respuesta procesada de " + addr.host() + ":" + addr.port());
-                    } else {
-                        System.err.println("[Master] Error en nodo remoto " + addr.host() + ": " + ex.getMessage());
+                CompletableFuture<Void> javaFuture = iceFuture.thenAccept(resultCsv -> {
+                    Map<RouteMonthKey, AggregationResult> partial = ResultSerializer.deserialize(resultCsv);
+                    synchronized (consolidated) {
+                        partial.forEach((k, v) ->
+                            consolidated.computeIfAbsent(k, ignored -> new AggregationResult()).merge(v));
                     }
+                    System.out.println("[Master] Respuesta procesada de " + addr.host() + ":" + addr.port());
+                }).exceptionally(ex -> {
+                    System.err.println("[Master] Error en nodo remoto " + addr.host() + ": " + ex.getMessage());
+                    return null;
                 });
 
                 futures.add(javaFuture);
