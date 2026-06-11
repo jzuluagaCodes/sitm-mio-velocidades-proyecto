@@ -59,8 +59,7 @@ public final class MainMaster {
         System.out.println("[Master] Rutas activas cargadas: " + activeRoutes.size());
 
         System.out.println("[Master] Leyendo datagramas desde: " + datagramsPath);
-        char sep = CsvReader.detectSeparator(datagramsPath);
-        List<Map<String, String>> allRows = new CsvReader(sep).readAll(datagramsPath);
+        List<String> allRows = CsvReader.readLines(datagramsPath);
         System.out.println("[Master] Filas cargadas: " + allRows.size());
 
         long start = System.currentTimeMillis();

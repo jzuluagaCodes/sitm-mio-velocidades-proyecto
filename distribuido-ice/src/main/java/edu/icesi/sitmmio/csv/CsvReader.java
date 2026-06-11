@@ -5,7 +5,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 public final class CsvReader {
     private final char separator;
@@ -29,6 +32,22 @@ public final class CsvReader {
             }
         }
         return rows;
+    }
+
+    public static List<String> readLines(Path path) throws IOException {
+        List<String> lines = new ArrayList<>();
+
+        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                if (!line.isBlank()) {
+                    lines.add(line);
+                }
+            }
+        }
+
+        return lines;
     }
 
     public static char detectSeparator(Path path) throws IOException {
