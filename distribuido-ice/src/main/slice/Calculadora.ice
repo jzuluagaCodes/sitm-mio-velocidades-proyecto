@@ -1,18 +1,15 @@
 module sitmmio {
 
-    /** Una fila del CSV: mapa de nombre_columna -> valor */
-    dictionary<string, string> CsvRow;
+    /** Una línea cruda del CSV de datagramas (sin encabezado, columnas por índice) */
+    sequence<string> RawLines;
 
-    /** Lista de filas que componen una partición del dataset */
-    sequence<CsvRow> Partition;
-
-    /** Conjunto de rutas activas (identificadores de ruta) */
+    /** Conjunto de rutas activas (LINEID numérico como string) */
     sequence<string> ActiveRoutes;
 
     /**
      * Interfaz remota expuesta por cada Worker.
      */
     interface Calculadora {
-        string calcular(Partition partition, ActiveRoutes activeRoutes);
+        string calcular(RawLines partition, ActiveRoutes activeRoutes);
     }
 }

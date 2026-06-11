@@ -11,35 +11,19 @@ import edu.icesi.sitmmio.ice.MasterIceCalculator.WorkerAddress;
 import java.nio.file.Path;
 import java.util.*;
 
-/**
- * Punto de entrada del nodo Master.
- *
- * Argumentos:
- *   --lines      <ruta>         CSV de rutas activas
- *   --datagrams  <ruta>         CSV de datagramas
- *   --output     <ruta>         CSV de salida
- *   --workers    host:port,...  Lista de workers separada por comas
- *
- * Ejemplo con 3 workers:
- *   java -jar sitm-mio-distribuido-ice-1.0.0.jar \
- *        --lines data/sample/lines-241-ActiveGT.csv \
- *        --datagrams data/sample/datagrams-MiniPilot.csv \
- *        --output output/distribuido.csv \
- *        --workers localhost:10001,localhost:10002,localhost:10003
- */
 public final class MainMaster {
 
     public static void main(String[] args) throws Exception {
-        Path linesPath      = Path.of("data/sample/lines-241-ActiveGT.csv");
-        Path datagramsPath  = Path.of("data/sample/datagrams-MiniPilot.csv");
-        Path outputPath     = Path.of("output/distribuido.csv");
+        Path linesPath     = Path.of("data/sample/lines-241-ActiveGT.csv");
+        Path datagramsPath = Path.of("data/sample/datagrams-MiniPilot.csv");
+        Path outputPath    = Path.of("output/distribuido.csv");
         List<WorkerAddress> workers = new ArrayList<>();
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "--lines":      linesPath     = Path.of(args[++i]); break;
-                case "--datagrams":  datagramsPath = Path.of(args[++i]); break;
-                case "--output":     outputPath    = Path.of(args[++i]); break;
+                case "--lines":     linesPath     = Path.of(args[++i]); break;
+                case "--datagrams": datagramsPath = Path.of(args[++i]); break;
+                case "--output":    outputPath    = Path.of(args[++i]); break;
                 case "--workers":
                     for (String spec : args[++i].split(","))
                         workers.add(WorkerAddress.parse(spec.trim()));
@@ -59,8 +43,8 @@ public final class MainMaster {
         System.out.println("[Master] Rutas activas cargadas: " + activeRoutes.size());
 
         System.out.println("[Master] Leyendo datagramas desde: " + datagramsPath);
-        char sep = CsvReader.detectSeparator(datagramsPath);
-        List<Map<String, String>> allRows = new CsvReader(sep).readAll(datagramsPath);
+        // CAMBIO: readLines en vez de readAll — datagramas no tienen encabezado
+        List<String> allRows = CsvReader.readLines(datagramsPath);
         System.out.println("[Master] Filas cargadas: " + allRows.size());
 
         long start = System.currentTimeMillis();

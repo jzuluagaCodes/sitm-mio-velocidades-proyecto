@@ -1,23 +1,29 @@
 package edu.icesi.sitmmio.csv;
 
-import edu.icesi.sitmmio.util.HeaderFinder;
-
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.HashSet;
+import java.util.Set;
+
 
 public final class ActiveRoutesReader {
-    private static final List<String> ROUTE_COLUMNS = List.of(
-            "route_id","routeid","line_id","lineid","route","ruta","line","linea","linename","nombre"
-    );
 
     public Set<String> readActiveRoutes(Path path) throws IOException {
-        char sep = CsvReader.detectSeparator(path);
-        List<Map<String, String>> rows = new CsvReader(sep).readAll(path);
         Set<String> routes = new HashSet<>();
-        for (Map<String, String> row : rows) {
-            String route = HeaderFinder.find(row, ROUTE_COLUMNS);
-            if (route != null && !route.isBlank()) routes.add(route.trim());
+        try (BufferedReader br = Files.newBufferedReader(path)) {
+            String header = br.readLine(); // saltar encabezado
+            if (header == null) return routes;
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.isBlank()) continue;
+                // split por coma respetando posibles comillas
+                String[] cols = line.split(",", -1);
+                if (cols.length == 0) continue;
+                String lineId = cols[0].replace("\"", "").trim();
+                if (!lineId.isBlank()) routes.add(lineId);
+            }
         }
         return routes;
     }

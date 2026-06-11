@@ -18,28 +18,26 @@ public final class CalculadoraImpl implements sitmmio.Calculadora {
     }
 
     @Override
-    public String calcular(Map<String, String>[] partition,
+    public String calcular(String[] partition,
                            String[] activeRoutes,
                            Current current) {
 
         System.out.println("\n[Worker] ¡Paquete recibido!");
 
-        List<Map<String, String>> rows = Arrays.asList(partition);
+        List<String> rows   = Arrays.asList(partition);
         Set<String> routeSet = new HashSet<>(Arrays.asList(activeRoutes));
 
-        // Si solo hay 1 hilo, procesa directo sin overhead de ThreadPool
         if (threads == 1) {
             return processSingle(rows, routeSet);
         }
 
-        // Varios hilos: subdivide la partición recibida
         Partitioner partitioner = new Partitioner();
-        List<List<Map<String, String>>> subPartitions = partitioner.split(rows, threads);
+        List<List<String>> subPartitions = partitioner.split(rows, threads);
 
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         List<Future<Map<RouteMonthKey, AggregationResult>>> futures = new ArrayList<>();
 
-        for (List<Map<String, String>> sub : subPartitions)
+        for (List<String> sub : subPartitions)
             futures.add(pool.submit(new AggregationTask(sub, routeSet)));
 
         pool.shutdown();
@@ -58,11 +56,11 @@ public final class CalculadoraImpl implements sitmmio.Calculadora {
         return ResultSerializer.serialize(consolidated);
     }
 
-    private String processSingle(List<Map<String, String>> rows, Set<String> routeSet) {
+    private String processSingle(List<String> rows, Set<String> routeSet) {
         edu.icesi.sitmmio.csv.DatagramMapper mapper = new edu.icesi.sitmmio.csv.DatagramMapper();
         edu.icesi.sitmmio.core.SpeedAggregator aggregator = new edu.icesi.sitmmio.core.SpeedAggregator();
         Map<RouteMonthKey, AggregationResult> results = aggregator.newResultMap();
-        for (Map<String, String> row : rows)
+        for (String row : rows)
             mapper.map(row, routeSet).ifPresent(r -> aggregator.add(results, r));
         return ResultSerializer.serialize(results);
     }

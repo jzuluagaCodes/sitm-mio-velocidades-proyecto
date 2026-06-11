@@ -31,6 +31,17 @@ public final class CsvReader {
         return rows;
     }
 
+    public static List<String> readLines(Path path) throws IOException {
+        List<String> lines = new ArrayList<>();
+        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.isBlank()) lines.add(line);
+            }
+        }
+        return lines;
+    }
+
     public static char detectSeparator(Path path) throws IOException {
         try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             String line = reader.readLine();
