@@ -1,0 +1,17 @@
+# Build
+target/
+**/target/
+
+# Outputs
+output/
+**/output/
+
+# Large datasets
+data/sample/datagrams-MiniPilot.csv
+data/sample/datagrams4Pilot.csv
+Monolito-hilos/data/sample/datagrams-MiniPilot.csv
+Monolito-hilos/data/sample/datagrams4Pilot.csv
+
+# IDE
+.idea/
+*.iml

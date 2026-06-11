@@ -1,43 +1,52 @@
 package edu.icesi.sitmmio.domain;
 
-import java.io.Serializable;
-
+import java.time.YearMonth;
 import java.util.Objects;
 
-public final class RouteMonthKey implements Comparable<RouteMonthKey>, Serializable {
-    private final String routeId;
-    private final String yearMonth;
+public final class RouteMonthKey implements Comparable<RouteMonthKey> {
 
-    public RouteMonthKey(String routeId, String yearMonth) {
+    private final String routeId;
+    private final YearMonth month;
+
+    public RouteMonthKey(String routeId, YearMonth month) {
         this.routeId = routeId;
-        this.yearMonth = yearMonth;
+        this.month = month;
     }
 
     public String getRouteId() {
         return routeId;
     }
 
+    public YearMonth getMonth() {
+        return month;
+    }
+
     public String getYearMonth() {
-        return yearMonth;
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (this == obj) return true;
-        if (!(obj instanceof RouteMonthKey)) return false;
-        RouteMonthKey other = (RouteMonthKey) obj;
-        return Objects.equals(routeId, other.routeId) && Objects.equals(yearMonth, other.yearMonth);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(routeId, yearMonth);
+        return month.toString();
     }
 
     @Override
     public int compareTo(RouteMonthKey other) {
-        int routeCompare = routeId.compareTo(other.routeId);
-        if (routeCompare != 0) return routeCompare;
-        return yearMonth.compareTo(other.yearMonth);
+        int routeComparison = this.routeId.compareTo(other.routeId);
+
+        if (routeComparison != 0) {
+            return routeComparison;
+        }
+
+        return this.month.compareTo(other.month);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof RouteMonthKey)) return false;
+        RouteMonthKey that = (RouteMonthKey) o;
+        return Objects.equals(routeId, that.routeId)
+                && Objects.equals(month, that.month);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(routeId, month);
     }
 }

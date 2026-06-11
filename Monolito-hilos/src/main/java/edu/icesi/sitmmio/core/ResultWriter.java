@@ -1,14 +1,14 @@
 package edu.icesi.sitmmio.core;
 
-import edu.icesi.sitmmio.domain.AggregationResult;
-import edu.icesi.sitmmio.domain.RouteMonthKey;
-
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+
+import edu.icesi.sitmmio.domain.AggregationResult;
+import edu.icesi.sitmmio.domain.RouteMonthKey;
 
 public final class ResultWriter {
     public void write(Path outputPath, Map<RouteMonthKey, AggregationResult> results) throws IOException {
@@ -22,7 +22,7 @@ public final class ResultWriter {
                 AggregationResult value = entry.getValue();
                 writer.write(escape(key.getRouteId()));
                 writer.write(',');
-                writer.write(escape(key.getYearMonth()));
+                writer.write(escape(key.getMonth().toString()));
                 writer.write(',');
                 writer.write(String.format(java.util.Locale.US, "%.6f", value.getAverageSpeed()));
                 writer.write(',');
